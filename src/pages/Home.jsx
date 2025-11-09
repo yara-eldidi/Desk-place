@@ -92,7 +92,7 @@ function HomePage() {
     });
 
     return () => unsubscribe();
-  }, [selectedDate, selectedSlotType, selectedCountry]);
+  }, [selectedDate, selectedSlotType, selectedCountry, countryDesks]);
 
   // 📋 تحميل حجوزات المستخدم
   useEffect(() => {
