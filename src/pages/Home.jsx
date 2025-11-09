@@ -13,12 +13,26 @@ function HomePage() {
   const [user, setUser] = useState(null);
   const [selectedDate, setSelectedDate] = useState(null);
   const [selectedSlotType, setSelectedSlotType] = useState("full");
+  const [selectedCountry, setSelectedCountry] = useState("USA");
   const [bookings, setBookings] = useState([]);
-  const [availableDesks, setAvailableDesks] = useState(100);
+  const [availableDesks, setAvailableDesks] = useState(0);
   const [allBookings, setAllBookings] = useState({});
   const [loadingLogout, setLoadingLogout] = useState(false);
+  const [selectedDesk, setSelectedDesk] = useState(null);
 
-  const desks = Array.from({ length: 100 }, (_, i) => `A${i + 1}`);
+  // 🗺️ تقسيم المكاتب على البلاد
+  const countryDesks = {
+    USA: Array.from({ length: 20 }, (_, i) => `U${i + 1}`),
+    Egypt: Array.from({ length: 20 }, (_, i) => `E${i + 1}`),
+    Spain: Array.from({ length: 20 }, (_, i) => `S${i + 1}`),
+    France: Array.from({ length: 20 }, (_, i) => `F${i + 1}`),
+    Italy: Array.from({ length: 20 }, (_, i) => `I${i + 1}`),
+    Greece: Array.from({ length: 20 }, (_, i) => `G${i + 1}`),
+    Germany: Array.from({ length: 20 }, (_, i) => `D${i + 1}`),
+    Portugal: Array.from({ length: 20 }, (_, i) => `P${i + 1}`),
+    UAE: Array.from({ length: 20 }, (_, i) => `UAE${i + 1}`),
+    Oman: Array.from({ length: 20 }, (_, i) => `O${i + 1}`),
+  };
 
   // 🧩 متابعة حالة المستخدم
   useEffect(() => {
@@ -29,77 +43,79 @@ function HomePage() {
     return unsubscribe;
   }, [auth, navigate]);
 
-  // 📅 استرجاع آخر تاريخ و slot محفوظين
+  // 📅 استرجاع آخر إعدادات
   useEffect(() => {
     const savedDate = localStorage.getItem("selectedDate");
     const savedSlotType = localStorage.getItem("selectedSlotType");
+    const savedCountry = localStorage.getItem("selectedCountry");
     if (savedDate) setSelectedDate(new Date(savedDate));
     if (savedSlotType) setSelectedSlotType(savedSlotType);
+    if (savedCountry) setSelectedCountry(savedCountry);
   }, []);
 
-  // 💾 حفظ التاريخ والـ slot
+  // 💾 حفظ الإعدادات
   useEffect(() => {
-    if (selectedDate && selectedSlotType) {
+    if (selectedDate && selectedSlotType && selectedCountry) {
       localStorage.setItem("selectedDate", selectedDate.toISOString());
       localStorage.setItem("selectedSlotType", selectedSlotType);
+      localStorage.setItem("selectedCountry", selectedCountry);
     }
-  }, [selectedDate, selectedSlotType]);
+  }, [selectedDate, selectedSlotType, selectedCountry]);
 
-  // 📊 تحميل الحجوزات لليوم الحالي
+  // 📊 تحميل الحجوزات حسب الدولة والتاريخ
   useEffect(() => {
-    if (!selectedDate) return;
+    if (!selectedDate || !selectedCountry) return;
 
     const localDate = new Date(
       selectedDate.getTime() - selectedDate.getTimezoneOffset() * 60000
     );
     const dateStr = localDate.toISOString().split("T")[0];
-    const bookingsRef = ref(db, `bookings/${dateStr}`);
+    const bookingsRef = ref(db, `bookings/${selectedCountry}/${dateStr}`);
 
     const unsubscribe = onValue(bookingsRef, (snapshot) => {
       const data = snapshot.val() || {};
       setAllBookings(data);
 
+      const desks = countryDesks[selectedCountry];
       const available = desks.filter((desk) => {
         const deskBooking = data[desk];
         if (!deskBooking) return true;
         const typesBooked = Object.keys(deskBooking);
-
-        if (selectedSlotType === "full") {
-          return typesBooked.length === 0;
-        } else {
-          return (
-            !typesBooked.includes("full") &&
-            !typesBooked.includes(selectedSlotType)
-          );
-        }
+        if (selectedSlotType === "full") return typesBooked.length === 0;
+        return (
+          !typesBooked.includes("full") &&
+          !typesBooked.includes(selectedSlotType)
+        );
       });
+
       setAvailableDesks(available.length);
     });
 
     return () => unsubscribe();
-  }, [desks, selectedDate, selectedSlotType]);
+  }, [selectedDate, selectedSlotType, selectedCountry]);
 
-  // 📋 تحميل جميع حجوزات المستخدم
+  // 📋 تحميل حجوزات المستخدم
   useEffect(() => {
     if (!user) return;
-
     const bookingsRef = ref(db, "bookings");
     const unsubscribe = onValue(bookingsRef, (snapshot) => {
-      if (!user) return; // 🔒 تأمين إضافي
       const allData = snapshot.val() || {};
       const userBookings = [];
 
-      Object.entries(allData).forEach(([date, desksData]) => {
-        Object.entries(desksData).forEach(([desk, types]) => {
-          Object.entries(types).forEach(([type, details]) => {
-            if (details.email === user.email) {
-              userBookings.push({
-                date,
-                deskNumber: desk,
-                type,
-                bookedAt: details.bookedAt,
-              });
-            }
+      Object.entries(allData).forEach(([country, datesData]) => {
+        Object.entries(datesData).forEach(([date, desksData]) => {
+          Object.entries(desksData).forEach(([desk, types]) => {
+            Object.entries(types).forEach(([type, details]) => {
+              if (details.email === user.email) {
+                userBookings.push({
+                  country,
+                  date,
+                  deskNumber: desk,
+                  type,
+                  bookedAt: details.bookedAt,
+                });
+              }
+            });
           });
         });
       });
@@ -111,10 +127,10 @@ function HomePage() {
     return () => unsubscribe();
   }, [user]);
 
-  // 🖊️ إضافة حجز جديد
+  // 🖊️ تنفيذ الحجز
   const handleBooking = () => {
-    if (!selectedDate) {
-      alert("Please select a date before booking");
+    if (!selectedDate || !selectedCountry || !selectedDesk) {
+      alert("Please select a country, date, and desk before booking");
       return;
     }
 
@@ -122,53 +138,36 @@ function HomePage() {
       selectedDate.getTime() - selectedDate.getTimezoneOffset() * 60000
     );
     const dateStr = localDate.toISOString().split("T")[0];
-
-    const available = desks.filter((desk) => {
-      const deskBooking = allBookings[desk];
-      if (!deskBooking) return true;
-
-      const typesBooked = Object.keys(deskBooking);
-      if (selectedSlotType === "full") {
-        return typesBooked.length === 0;
-      } else {
-        return (
-          !typesBooked.includes("full") &&
-          !typesBooked.includes(selectedSlotType)
-        );
-      }
-    });
-
-    if (available.length === 0) {
-      alert("No desks available for this slot.");
-      return;
-    }
-
-    const chosenDesk = available[0];
     const bookingRef = ref(
       db,
-      `bookings/${dateStr}/${chosenDesk}/${selectedSlotType}`
+      `bookings/${selectedCountry}/${dateStr}/${selectedDesk}/${selectedSlotType}`
     );
 
     set(bookingRef, {
       email: user.email,
       bookedAt: new Date().toISOString(),
+    }).then(() => {
+      alert(`Desk ${selectedDesk} booked successfully!`);
+      setSelectedDesk(null);
     });
   };
 
   // ❌ إلغاء الحجز
   const handleCancel = (b) => {
-    const bookingRef = ref(db, `bookings/${b.date}/${b.deskNumber}/${b.type}`);
+    const bookingRef = ref(
+      db,
+      `bookings/${b.country}/${b.date}/${b.deskNumber}/${b.type}`
+    );
     remove(bookingRef);
   };
 
-  // 🚪 تسجيل الخروج (محسّن)
+  // 🚪 تسجيل الخروج
   const handleLogout = async () => {
     try {
       setLoadingLogout(true);
       await signOut(auth);
       setUser(null);
-      localStorage.removeItem("selectedDate");
-      localStorage.removeItem("selectedSlotType");
+      localStorage.clear();
       navigate("/login");
     } catch (error) {
       console.error("Logout error:", error);
@@ -177,8 +176,11 @@ function HomePage() {
     }
   };
 
+  const desks = countryDesks[selectedCountry];
+
   return (
     <div className="min-h-screen bg-gray-50">
+      {/* Header */}
       <div className="head flex items-center justify-between mb-8 p-4 bg-cyan-700 rounded-b-lg shadow-md">
         <div>
           <h1 className="text-2xl font-bold text-white">Desk Place</h1>
@@ -195,28 +197,27 @@ function HomePage() {
         <button
           onClick={handleLogout}
           disabled={loadingLogout}
-          className={`font-bold px-4 py-2 rounded-md transition-all duration-500 
-            ${
-              loadingLogout
-                ? "bg-gray-400 text-white cursor-not-allowed"
-                : "bg-gray-50 text-cyan-700 hover:bg-gray-200"
-            }`}
+          className={`font-bold px-4 py-2 rounded-md transition-all duration-500 ${
+            loadingLogout
+              ? "bg-gray-400 text-white cursor-not-allowed"
+              : "bg-gray-50 text-cyan-700 hover:bg-gray-200"
+          }`}
         >
           {loadingLogout ? "Logging out..." : "Logout"}
         </button>
       </div>
 
+      {/* Content */}
       <div className="max-w-6xl mx-auto pb-10">
         <div className="grid md:grid-cols-2 gap-6">
           {/* 🗓️ الحجز */}
           <div className="bg-white p-6 rounded-xl shadow-md hover:shadow-xl transition-shadow duration-500">
-            <h2 className="text-lg font-bold text-gray-800 mb-1">
-              Book a Desk
-            </h2>
+            <h2 className="text-lg font-bold text-gray-800 mb-1">Book a Desk</h2>
             <p className="text-sm text-gray-500 mb-4">
-              Select your preferred date and slot
+              Select your preferred country, date, slot, and desk
             </p>
 
+            {/* التاريخ */}
             <div className="mb-4">
               <label className="block text-sm font-medium text-gray-700">
                 Select Date
@@ -229,6 +230,7 @@ function HomePage() {
               />
             </div>
 
+            {/* نوع الـ Slot */}
             <div className="mb-4">
               <label className="block text-sm font-medium text-gray-700">
                 Select Slot Type
@@ -244,6 +246,7 @@ function HomePage() {
               </select>
             </div>
 
+            {/* عدد المكاتب المتاحة */}
             <div className="flex justify-between items-center bg-blue-50 p-3 rounded-md mb-4">
               <span className="text-gray-700">Available Desks</span>
               <span className="bg-white px-3 py-1 rounded-md shadow text-cyan-600 font-bold">
@@ -251,7 +254,26 @@ function HomePage() {
               </span>
             </div>
 
-            <div className="grid grid-cols-10 gap-2 mb-4">
+            {/* البلد */}
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-gray-700">
+                Select Country
+              </label>
+              <select
+                value={selectedCountry}
+                onChange={(e) => setSelectedCountry(e.target.value)}
+                className="w-full border border-gray-300 rounded-md p-2 mt-1"
+              >
+                {Object.keys(countryDesks).map((country) => (
+                  <option key={country} value={country}>
+                    {country}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* عرض المكاتب */}
+            <div className="grid grid-cols-5 gap-2 mb-4">
               {desks.map((desk) => {
                 const deskBooking = allBookings[desk];
                 const typesBooked = deskBooking ? Object.keys(deskBooking) : [];
@@ -262,16 +284,23 @@ function HomePage() {
                   typesBooked.includes("full") ||
                   typesBooked.includes(selectedSlotType);
 
+                const isSelected = desk === selectedDesk;
+
                 return (
                   <div
                     key={desk}
-                    className={`p-2 rounded text-center cursor-pointer text-sm font-semibold flex items-center justify-center
+                    onClick={() => {
+                      if (!booked && !isMine) setSelectedDesk(desk);
+                    }}
+                    className={`p-2 rounded text-center cursor-pointer text-sm font-semibold flex items-center justify-center transition-all duration-300
                     ${
                       isMine
                         ? "bg-cyan-500 text-white"
                         : booked
-                        ? "bg-red-400 text-white"
-                        : "bg-emerald-600 text-white"
+                        ? "bg-red-400 text-white cursor-not-allowed"
+                        : isSelected
+                        ? "bg-yellow-400 text-black"
+                        : "bg-emerald-600 text-white hover:bg-emerald-500"
                     }`}
                   >
                     {desk}
@@ -282,9 +311,14 @@ function HomePage() {
 
             <button
               onClick={handleBooking}
-              className="w-full bg-black text-white py-2 rounded-md hover:bg-gray-800 transition-all duration-500"
+              disabled={!selectedDesk}
+              className={`w-full py-2 rounded-md transition-all duration-500 ${
+                selectedDesk
+                  ? "bg-black text-white hover:bg-gray-800"
+                  : "bg-gray-300 text-gray-600 cursor-not-allowed"
+              }`}
             >
-              Book Desk
+              {selectedDesk ? `Book ${selectedDesk}` : "Select a Desk to Book"}
             </button>
           </div>
 
@@ -304,6 +338,9 @@ function HomePage() {
                     key={index}
                     className="bg-green-50 border border-green-200 rounded-lg p-4 space-y-2"
                   >
+                    <p className="text-gray-800">
+                      <strong>Country:</strong> {b.country}
+                    </p>
                     <p className="text-gray-800">
                       <strong>Date:</strong> {b.date}
                     </p>
@@ -325,7 +362,7 @@ function HomePage() {
             ) : (
               <div className="text-center text-gray-500 mt-10">
                 <p>No active bookings</p>
-                <p>Select a date and slot to book a desk</p>
+                <p>Select a desk and book your spot</p>
               </div>
             )}
           </div>
